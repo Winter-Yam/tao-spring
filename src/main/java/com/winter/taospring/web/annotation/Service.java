@@ -1,4 +1,4 @@
-package com.winter.taospring.annotation;
+package com.winter.taospring.web.annotation;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

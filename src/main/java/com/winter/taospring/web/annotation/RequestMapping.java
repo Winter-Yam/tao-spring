@@ -1,4 +1,4 @@
-package com.winter.taospring.annotation;
+package com.winter.taospring.web.annotation;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -6,9 +6,11 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Controller层Bean的注解
+ * 请求映射注解
  */
-@Target(ElementType.TYPE)
+@Target({ElementType.TYPE,ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
-public @interface Controller {
+public @interface RequestMapping {
+
+    String value() default "";
 }

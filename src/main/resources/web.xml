@@ -7,7 +7,7 @@
     <display-name>Web App</display-name>
     <servlet>
         <servlet-name>tao</servlet-name>
-        <servlet-class>com.winter.taospring.servlet.DispatchServlet</servlet-class>
+        <servlet-class>com.winter.taospring.web.servlet.DispatchServlet</servlet-class>
         <init-param>
             <param-name>contextConfigLocation</param-name>
             <param-value>application.properties</param-value>

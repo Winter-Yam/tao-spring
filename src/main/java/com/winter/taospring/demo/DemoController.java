@@ -1,9 +1,10 @@
 package com.winter.taospring.demo;
 
-import com.winter.taospring.annotation.Autowired;
-import com.winter.taospring.annotation.Controller;
-import com.winter.taospring.annotation.RequestMapping;
-import com.winter.taospring.annotation.RequestParam;
+
+import com.winter.taospring.web.annotation.Autowired;
+import com.winter.taospring.web.annotation.Controller;
+import com.winter.taospring.web.annotation.RequestMapping;
+import com.winter.taospring.web.annotation.RequestParam;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -20,7 +21,7 @@ public class DemoController {
 
     @RequestMapping("/query")
     public void query(HttpServletRequest req, HttpServletResponse resp,
-                      @RequestParam("name") String name){
+                      @RequestParam("name") String name, @RequestParam("age")String age){
         String result = demoService.get(name);
         // String result = "My name is " + name;
         try {

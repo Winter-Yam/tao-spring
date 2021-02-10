@@ -1,6 +1,7 @@
 package com.winter.taospring.demo;
 
-import com.winter.taospring.annotation.Service;
+
+import com.winter.taospring.web.annotation.Service;
 
 @Service
 public class DemoServiceImpl implements IDemoService {

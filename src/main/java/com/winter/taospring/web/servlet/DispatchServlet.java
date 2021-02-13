@@ -1,7 +1,7 @@
 package com.winter.taospring.web.servlet;
 
 
-import com.winter.taospring.web.Handler;
+import com.winter.taospring.web.HandlerMapping;
 import com.winter.taospring.web.annotation.*;
 
 import javax.servlet.ServletConfig;
@@ -32,7 +32,7 @@ public class DispatchServlet extends HttpServlet {
     private Map<String,Object> ioc = new HashMap<>();
 
     //保存url和Method的对应关系
-    private List<Handler> handlerMapping = new ArrayList<>();
+    private List<HandlerMapping> handlerMapping = new ArrayList<>();
 
     /**
      * 用于初始化所有的类、IOC容器、servletBean
@@ -75,7 +75,7 @@ public class DispatchServlet extends HttpServlet {
                     // url转换为正则
                     Pattern pattern = Pattern.compile(url);
                     // 缓存url和controller方法的关系
-                    handlerMapping.add(new Handler(pattern, entry.getValue(),method));
+                    handlerMapping.add(new HandlerMapping(pattern, entry.getValue(),method));
                     System.out.println("Mapped " + url + "," + method);
                 }
             }
@@ -230,7 +230,7 @@ public class DispatchServlet extends HttpServlet {
 
     private void doDispatch(HttpServletRequest req, HttpServletResponse resp) throws Exception {
 
-        Handler handler = getHandler(req, resp);
+        HandlerMapping handler = getHandler(req, resp);
         if(handler==null){
             resp.getWriter().write("404 Not Found!!");
             return;
@@ -281,7 +281,7 @@ public class DispatchServlet extends HttpServlet {
         resp.getWriter().write(returnValue.toString());
     }
 
-    private Handler getHandler(HttpServletRequest req, HttpServletResponse resp){
+    private HandlerMapping getHandler(HttpServletRequest req, HttpServletResponse resp){
         if (handlerMapping.isEmpty()) {
             return null;
         }
@@ -292,7 +292,7 @@ public class DispatchServlet extends HttpServlet {
         String contextPath = req.getContextPath();
         url = url.replace(contextPath, "").replaceAll("/+", "/");
 
-        for (Handler handler : handlerMapping) {
+        for (HandlerMapping handler : handlerMapping) {
             // 具体的URL与handler的正则匹配
             Matcher matcher = handler.getUrlPattern().matcher(url);
             if(matcher.find()){

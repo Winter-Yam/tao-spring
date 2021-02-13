@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 /**
  * 处理URL和method方法的映射，及相关功能完善
  */
-public class Handler {
+public class HandlerMapping {
 
     private Pattern urlPattern;     //URL或URL的正则
     private Method method;          //对应要调用的方法
@@ -25,7 +25,7 @@ public class Handler {
     //参数的名字作为key,参数的顺序，位置作为值（只处理@RequestParam修饰的）
     private Map<String,Integer> paramIndexMapping;
 
-    public Handler(Pattern pattern, Object controller, Method method) {
+    public HandlerMapping(Pattern pattern, Object controller, Method method) {
         this.urlPattern = pattern;
         this.method = method;
         this.controller = controller;

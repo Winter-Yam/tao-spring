@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * 处理URL和method方法的映射，及相关功能完善
+ * 处理URL和Controller的method方法的映射，及相关功能完善
  */
 public class HandlerMapping {
 
@@ -21,45 +21,11 @@ public class HandlerMapping {
     private Object controller;      //对应的Controller
     private Class<?> [] paramTypes; //形参类型数组
 
-    //形参列表
-    //参数的名字作为key,参数的顺序，位置作为值（只处理@RequestParam修饰的）
-    private Map<String,Integer> paramIndexMapping;
-
     public HandlerMapping(Pattern pattern, Object controller, Method method) {
         this.urlPattern = pattern;
         this.method = method;
         this.controller = controller;
         paramTypes = method.getParameterTypes();
-        paramIndexMapping = new HashMap<String, Integer>();
-
-        putParamIndexMapping(method);
-    }
-
-    // 填充形参列表
-    private void putParamIndexMapping(Method method) {
-        Annotation[][] annotationArray = method.getParameterAnnotations();
-        int i = 0;
-        //提取方法中的request和response参数
-        Class<?> [] paramsTypes = method.getParameterTypes();
-        for (i = 0; i < paramsTypes.length ; i ++) {
-            Class<?> type = paramsTypes[i];
-            if(type == HttpServletRequest.class ||
-                    type == HttpServletResponse.class){
-                paramIndexMapping.put(type.getName(),i);
-            }
-        }
-        for (i = 0; i < annotationArray.length; i++) {
-            Annotation[] annotations = annotationArray[i];
-            for (Annotation annotation : annotations) {
-                if(annotation instanceof RequestParam){
-                    RequestParam requestParam = (RequestParam)annotation;
-                    String paramName = requestParam.value();
-                    if(!"".equals(paramName.trim())){
-                        paramIndexMapping.put(paramName,i);
-                    }
-                }
-            }
-        }
     }
 
     public Pattern getUrlPattern() {
@@ -92,13 +58,5 @@ public class HandlerMapping {
 
     public void setParamTypes(Class<?>[] paramTypes) {
         this.paramTypes = paramTypes;
-    }
-
-    public Map<String, Integer> getParamIndexMapping() {
-        return paramIndexMapping;
-    }
-
-    public void setParamIndexMapping(Map<String, Integer> paramIndexMapping) {
-        this.paramIndexMapping = paramIndexMapping;
     }
 }

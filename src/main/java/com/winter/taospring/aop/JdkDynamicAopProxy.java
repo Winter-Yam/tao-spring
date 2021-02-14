@@ -16,6 +16,9 @@ public class JdkDynamicAopProxy implements AopProxy, InvocationHandler {
         this.advise = advise;
     }
 
+    /**
+     * 代理对象每个方法都会执行invoke
+     */
     @Override
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
         // 获取方法的拦截器链

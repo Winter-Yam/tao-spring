@@ -1,7 +1,8 @@
 package com.winter.taospring.web.servlet;
 
 
-import com.winter.taospring.web.HandlerMapping;
+import com.winter.taospring.context.ApplicationContext;
+import com.winter.taospring.web.*;
 import com.winter.taospring.web.annotation.*;
 
 import javax.servlet.ServletConfig;
@@ -13,11 +14,8 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.lang.annotation.Annotation;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.net.URL;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -29,10 +27,14 @@ public class DispatchServlet extends HttpServlet {
     private List<String> classNames = new ArrayList<>();
 
     // Spring的IOC容器
-    private Map<String,Object> ioc = new HashMap<>();
+    private ApplicationContext context;
 
     //保存url和Method的对应关系
-    private List<HandlerMapping> handlerMapping = new ArrayList<>();
+    private List<HandlerMapping> handlerMappings = new ArrayList<>();
+    // 保存视图解析器的容器
+    private List<ViewResolver> viewResolvers = new ArrayList<>();
+    // 保存 <HandlerMapping，HandlerAdpter> 映射关系的容器（用于获取执行方法的请求适配器）
+    private Map<HandlerMapping, HandlerAdapter> handereAdpters = new HashMap<>();
 
     /**
      * 用于初始化所有的类、IOC容器、servletBean
@@ -41,175 +43,99 @@ public class DispatchServlet extends HttpServlet {
      */
     @Override
     public void init(ServletConfig config) throws ServletException {
-        // 1.加载配置文件
-        loadConfig(config.getInitParameter("contextConfigLocation"));
-        // 2.扫描Bean的类
-        doScanner(configContext.getProperty("scanPackage"));
-        // 3.初始化并加入到IoC容器中
-        doIoc();
-        // 4.完成依赖注入
-        doAutowire();
-        // 5.初始化HandlerMapping
-        initHandlerMapping();
+        // 1.初始化ApplicationContext ！！！
+        // tomcat会加载web.xml并创建其中配置的servlet，同时会执行init方法，这里的config即web.xml配置信息
+        context = new ApplicationContext(config.getInitParameter("contextConfigLocation"));
 
-        System.out.println("Spring framework init success");
+        // 2.初始化SpringMVC九大组件
+        initStrategies();
+    }
+
+    /**
+     * 部分组件暂不实现
+     */
+    private void initStrategies() {
+        // 多文件上传的组件
+        //initMultipartResolver(context);
+        // 初始化本地语言环境
+        //initLocaleResolver(context);
+        // 初始化模板处理器
+        //initThemeResolver(context);
+
+
+        // handlerMapping，必须实现
+        initHandlerMapping();
+        // 初始化参数适配器，必须实现
+        initHandlerAdapters();
+        // 初始化异常拦截器
+        //initHandlerExceptionResolvers(context);
+        // 初始化视图预处理器
+        //initRequestToViewNameTranslator(context);
+
+
+        // 初始化视图转换器，必须实现
+        initViewResolvers();
+        // 参数缓存器
+        //initFlashMapManager(context);
+    }
+
+    private void initViewResolvers() {
+        // 拿到在配置文件中配置的模板存放路径(layouts)
+        String templateRoot = context.getConfig().getProperty("templateRoot");
+
+        // 通过相对路径找到目标后，获取到绝对路径
+        // 注：getResourse返回的是URL对象，getFile返回文件的绝对路径
+        String templateRootPath = this.getClass().getClassLoader().getResource(templateRoot).getFile();
+
+        // 拿到模板目录下的所有文件名（这里是所有html名）
+        File templateRootDir = new File(templateRootPath);
+        String[] templates = templateRootDir.list();
+
+        // 视图解析器可以有多种，且不同的模板需要不同的Resolver去解析成不同的View（jsp，html，json。。）
+        // 但这里其实就只有一种（解析成html）
+        // 为了仿真才写了这个循环，其实只循环一次
+        for (int i = 0; i < templates.length; i ++) {
+            this.viewResolvers.add(new ViewResolver(templateRoot));
+        }
+    }
+
+    private void initHandlerAdapters() {
+        // 为每一个 HandlerMapping 都创建一个 HandlerAdpter
+        for (HandlerMapping handlerMapping : this.handlerMappings) {
+            this.handereAdpters.put(handlerMapping, new HandlerAdapter());
+        }
     }
 
     private void initHandlerMapping() {
-        for (Map.Entry<String, Object> entry : ioc.entrySet()) {
-            Class<?> clazz = entry.getValue().getClass();
-            if (clazz.isAnnotationPresent(Controller.class)) {
-
-                String baseUrl = "";
-                if (clazz.isAnnotationPresent(RequestMapping.class)) {
-                    RequestMapping requestMapping = clazz.getAnnotation(RequestMapping.class);
-                    baseUrl = requestMapping.value();
-                }
-                Method[] methods = clazz.getMethods();
-                for (Method method : methods) {
-                    if (!method.isAnnotationPresent(RequestMapping.class)) {
-                        continue;
-                    }
-                    RequestMapping requestMapping = method.getAnnotation(RequestMapping.class);
-                    String url = ("/"+baseUrl + "/" + requestMapping.value()).replaceAll("/+", "/");
-                    // url转换为正则
-                    Pattern pattern = Pattern.compile(url);
-                    // 缓存url和controller方法的关系
-                    handlerMapping.add(new HandlerMapping(pattern, entry.getValue(),method));
-                    System.out.println("Mapped " + url + "," + method);
-                }
-            }
-        }
-    }
-
-    private void doAutowire() {
-        if(ioc.isEmpty()){
-            return;
-        }
-        for (Map.Entry<String, Object> entry : ioc.entrySet()) {
-            // 获取所有被@Autowired注解的字段
-            Object instance = entry.getValue();
-            Field[] fields = instance.getClass().getDeclaredFields();
-            for (Field field : fields) {
-                if(!field.isAnnotationPresent(Autowired.class)){
-                    continue;
-                }
-                // 如果没有自定义Autowire名称，默认注入类型的名称
-                Autowired autowired = field.getAnnotation(Autowired.class);
-                String beanName = autowired.value().trim();
-                if("".equals(beanName)){
-                    //获得接口的类型，作为key待会拿这个key到ioc容器中去取值（接口需要获取全限定名）
-                    beanName = field.getType().getName();
-                }
-
-                // 设置private可访问
-                field.setAccessible(true);
-                try {
-                    // 模拟自动注入，用反射设置值
-                    field.set(instance, ioc.get(beanName));
-                } catch (IllegalAccessException e) {
-                    e.printStackTrace();
-                }
-            }
-        }
-    }
-
-    private void doIoc() {
         try {
-            for (String className : classNames) {
-                // 不带"."说明不是完整全限定名，不需要处理
-                if (!className.contains(".")) {
-                    continue;
-                }
-                // 加载或查找指定的类型
-                Class<?> clazz = Class.forName(className);
+            for (String beanName : context.getBeanDefinitionNames()) {
+                Object controller = context.getBean(beanName);
+                Class<?> clazz = controller.getClass();
                 if (clazz.isAnnotationPresent(Controller.class)) {
-                    // 根据@Controller注解进行处理，不需要将Controller计入容器，这里假设不需要使用
-                    //Spring默认类名首字母小写
-                    String beanName = toLowerFirstCase(clazz.getSimpleName());
-                    Object instance = clazz.newInstance();
-                    ioc.put(beanName,instance);
-                } else if (clazz.isAnnotationPresent(Service.class)) {
-                    // 根据@Service注解进行处理
-                    Service service = clazz.getAnnotation(Service.class);
-                    // 配置bean name
-                    String beanName = service.value();
-                    if ("".equals(beanName.trim())) {
-                        beanName = toLowerFirstCase(clazz.getSimpleName());
-                    }
-                    // 创建bean的实例
-                    Object instance = clazz.newInstance();
-                    // 将实现类加入容器中
-                    ioc.put(beanName, instance);
 
-                    // 将实现类对应的接口类也加入到容器中，用于面向接口编程（实际逻辑会有点问题）
-                    for (Class<?> i : clazz.getInterfaces()) {
-                        if(ioc.containsKey(i.getName())){
-                            System.out.println("The “" + i.getName() + "” is exists!!");
+                    String baseUrl = "";
+                    if (clazz.isAnnotationPresent(RequestMapping.class)) {
+                        RequestMapping requestMapping = clazz.getAnnotation(RequestMapping.class);
+                        baseUrl = requestMapping.value();
+                    }
+                    Method[] methods = clazz.getMethods();
+                    for (Method method : methods) {
+                        if (!method.isAnnotationPresent(RequestMapping.class)) {
+                            continue;
                         }
-                        ioc.put(i.getName(), instance);
+                        RequestMapping requestMapping = method.getAnnotation(RequestMapping.class);
+                        String url = ("/"+baseUrl + "/" + requestMapping.value()).replaceAll("/+", "/");
+                        // url转换为正则
+                        Pattern pattern = Pattern.compile(url);
+                        // 缓存url和controller方法的关系
+                        handlerMappings.add(new HandlerMapping(pattern, controller,method));
+                        System.out.println("Mapped " + url + "," + method);
                     }
-
-                } else {
-                    continue;
                 }
             }
-        } catch (Exception e){
+        } catch (Exception e) {
             e.printStackTrace();
         }
-    }
-
-    private void loadConfig(String contextConfigLocation) {
-        // 读取web.xml配置文件application.properties位置
-        InputStream in = this.getClass().getClassLoader().getResourceAsStream(contextConfigLocation);
-
-        try {
-            // 获取application.properties的属性到上下文中
-            configContext.load(in);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }finally {
-            if(null != in){
-                try {
-                    in.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
-        }
-    }
-
-    private void doScanner(String scanPackage) {
-        // 获取包的绝对目录地址
-        // classloader.getResource用于加载绝对路径
-        URL url = this.getClass().getClassLoader().getResource(scanPackage.replaceAll("\\.", "/"));
-        // 根据URL创建class目录
-        File classDir = new File(url.getFile());
-        // 遍历目录下的所有文件
-        for (File file : classDir.listFiles()) {
-            if(file.isDirectory()){
-                // 如果是目录，递归扫描
-                doScanner(scanPackage+"."+file.getName());
-            }else{
-                // 如果是文件，判断是否为class文件
-                if(file.getName().endsWith(".class")){
-                    // 将class文件对应的全限定类名缓存到mapping中
-                    String clazzName = (scanPackage + "." + file.getName().replace(".class",""));
-                    classNames.add(clazzName);
-                }
-            }
-        }
-    }
-
-    //为了简化程序逻辑，就不做其他判断了，大家了解就OK
-    //其实用写注释的时间都能够把逻辑写完了
-    private String toLowerFirstCase(String simpleName) {
-        char [] chars = simpleName.toCharArray();
-        //之所以加，是因为大小写字母的ASCII码相差32，
-        // 而且大写字母的ASCII码要小于小写字母的ASCII码
-        //在Java中，对char做算学运算，实际上就是对ASCII码做算学运算
-        chars[0] += 32;
-        return String.valueOf(chars);
     }
 
     @Override
@@ -230,59 +156,52 @@ public class DispatchServlet extends HttpServlet {
 
     private void doDispatch(HttpServletRequest req, HttpServletResponse resp) throws Exception {
 
+        // 获取HandlerMapping
         HandlerMapping handler = getHandler(req, resp);
         if(handler==null){
-            resp.getWriter().write("404 Not Found!!");
+            processDispatchResult(req, resp, new ModelAndView("404"));
             return;
         }
 
-        Method method = handler.getMethod();
+        // 2.获取当前handler对应的处理参数的Adpter
+        HandlerAdapter handlerAdapter = getHandlerAdapter(handler);
 
-        // 获取请求参数
-        Map<String, String[]> parameterMap = req.getParameterMap();
-        Class<?>[] parameterTypes = method.getParameterTypes();
-        Annotation[][] parameterAnnotations = method.getParameterAnnotations();
+        // 3.Adpter负责处理 request 中携带的参数然后执行处理请求的方法
+        // 执行的结果可能是null(增加、删除、异常...）也可能是ModelAndView（查询...）
+        // Adpter真正调用处理请求的方法,返回ModelAndView（存储了页面上值，和页面模板的名称）
+        ModelAndView mv = handlerAdapter.handle(req, resp, handler);
 
-        Object [] paramValues = new Object[parameterTypes.length];
+        // 4.真正输出,将方法执行进行处理然后返回
+        // 如果上面返回的是 ModelAndView ，那么还要通过视图解析器和模板引擎进行解析
+        processDispatchResult(req, resp, mv);
+    }
 
-        Map<String, Integer> paramIndexMapping = handler.getParamIndexMapping();
-        for (Map.Entry<String, String[]> param : parameterMap.entrySet()) {
-            // 获取请求参数对应的值
-            String value = Arrays.toString(param.getValue())
-                    .replaceAll("\\[|\\]","");
-
-            // 检查该请求参数是否有修改@RequestParam
-            if (!paramIndexMapping.containsKey(param.getKey())) {
-                continue;
-            }
-            // 设置到参数数组中
-            Integer index = paramIndexMapping.get(param.getKey());
-            paramValues[index] = convert(parameterTypes[index], value);
-        }
-
-        // 处理req和resp类型的参数
-        if (paramIndexMapping.containsKey(HttpServletRequest.class.getName())) {
-            int reqIndex = paramIndexMapping.get(HttpServletRequest.class.getName());
-            paramValues[reqIndex] = req;
-        }
-
-        if (paramIndexMapping.containsKey(HttpServletResponse.class.getName())) {
-            int respIndex = paramIndexMapping.get(HttpServletResponse.class.getName());
-            paramValues[respIndex] = resp;
-        }
-
-        // 反射调用方法
-        Object returnValue = method.invoke(handler.getController(), paramValues);
-
-        // 返回结果塞到resp中
-        if (returnValue == null || returnValue instanceof Void) {
+    /**
+     * 处理请求的结果，并解析成HTML
+     */
+    private void processDispatchResult(HttpServletRequest req, HttpServletResponse resp, ModelAndView mv) throws Exception {
+        // null 表示方法返回类型是void，或返回值是null。不做额外处理
+        if(mv == null) {
             return;
         }
-        resp.getWriter().write(returnValue.toString());
+
+        // 如果没有视图解析器就返回，因为无法处理ModelAndView
+        if (this.viewResolvers.isEmpty()) {
+            return;
+        }
+
+        // 遍历视图解析器
+        for (ViewResolver viewResolver : this.viewResolvers) {
+            // 通过相应解析器，返回相应页面 View
+            View view = viewResolver.resolveViewName(mv.getViewName(), null);
+            // View通过模板引擎（自定义的）解析后输出
+            view.render(mv.getModel(), req, resp);
+            return;
+        }
     }
 
     private HandlerMapping getHandler(HttpServletRequest req, HttpServletResponse resp){
-        if (handlerMapping.isEmpty()) {
+        if (handlerMappings.isEmpty()) {
             return null;
         }
         // 获取请求的URL
@@ -292,7 +211,7 @@ public class DispatchServlet extends HttpServlet {
         String contextPath = req.getContextPath();
         url = url.replace(contextPath, "").replaceAll("/+", "/");
 
-        for (HandlerMapping handler : handlerMapping) {
+        for (HandlerMapping handler : handlerMappings) {
             // 具体的URL与handler的正则匹配
             Matcher matcher = handler.getUrlPattern().matcher(url);
             if(matcher.find()){
@@ -302,21 +221,15 @@ public class DispatchServlet extends HttpServlet {
         return null;
     }
 
-    /**
-     * 转换真实类型，方面后面的处理
-     */
-    //url传过来的参数都是String类型的，HTTP是基于字符串协议
-    //只需要把String转换为任意类型就好
-    private Object convert(Class<?> type, String value) {
-        //如果是int
-        if (Integer.class == type) {
-            return Integer.valueOf(value);
-        } else if (Double.class == type) {
-            return Double.valueOf(value);
+    private HandlerAdapter getHandlerAdapter(HandlerMapping handler) {
+        if (this.handereAdpters.isEmpty()) {
+            return null;
         }
-        //如果还有double或者其他类型，继续加if
-        //这时候，我们应该想到策略模式了
-        //在这里暂时不实现，希望小伙伴自己来实现
-        return value;
+        HandlerAdapter handlerAdpter = this.handereAdpters.get(handler);
+        // 判断当前handler能否被当前Adapter进行适配
+        if (handlerAdpter.supports(handler)) {
+            return handlerAdpter;
+        }
+        return null;
     }
 }

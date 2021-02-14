@@ -14,7 +14,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 解析AOP配置的类，建立切入方法与拦截器链的映射关系
+ * AOP增强支持类
+ * 1、解析AOP配置的类
+ * 2、建立切入方法与拦截器链的映射关系
  */
 public class AdvisedSupport {
     // 目标类
@@ -28,6 +30,10 @@ public class AdvisedSupport {
     // 切入点方法和拦截器链的映射关系
     private transient Map<Method, List<Object>> methodCache = new HashMap<>();
 
+    public AdvisedSupport(AopConfig config) {
+        this.config = config;
+    }
+
     private void parse(){
         String pointCut = config.getPointCut()
                 .replaceAll("\\.","\\\\.")
@@ -37,13 +43,12 @@ public class AdvisedSupport {
 
         // 1.通过正则表达式获取被代理类特征，初始化pointCutForClassRegex
         String pointCutForClassRegex = pointCut.substring(0,pointCut.lastIndexOf("\\(") - 4);
-        pointCutClassPattern = Pattern.compile("class " + pointCutForClassRegex.substring(
-                pointCutForClassRegex.lastIndexOf(" ") + 1));
+        pointCutClassPattern = Pattern.compile("class " + pointCutForClassRegex.substring(pointCutForClassRegex.lastIndexOf(" ") + 1));
 
         try {
             // 2.获取被切的类
             Class aspectClass = Class.forName(this.config.getAspectClass());
-            // 保存切面类的所有方法
+            // 保存切面类的所有增强方法
             Map<String,Method> aspectMethods = new HashMap<>();
             for (Method method : aspectClass.getMethods()) {
                 aspectMethods.put(method.getName(), method);
@@ -66,17 +71,17 @@ public class AdvisedSupport {
                     List<Object> advices = new LinkedList<>();
                     // 把每一个方法包装成 MethodIterceptor
                     // before
-                    if(config.getAspectBefore()==null||config.getAspectBefore().equals("")){
+                    if(!(config.getAspectBefore()==null||config.getAspectBefore().equals(""))){
                         MethodBeforeAdviceInterceptor interceptor = new MethodBeforeAdviceInterceptor(aspectMethods.get(config.getAspectBefore()), aspectClass.newInstance());
                         advices.add(interceptor);
                     }
                     // after
-                    if(config.getAspectAfter()==null||config.getAspectAfter().equals("")){
+                    if(!(config.getAspectAfter()==null||config.getAspectAfter().equals(""))){
                         AfterReturningAdviceInterceptor interceptor = new AfterReturningAdviceInterceptor(aspectMethods.get(config.getAspectAfter()), aspectClass.newInstance());
                         advices.add(interceptor);
                     }
                     // throwing
-                    if(config.getAspectAfterThrow()==null||config.getAspectAfterThrow().equals("")){
+                    if(!(config.getAspectAfterThrow()==null||config.getAspectAfterThrow().equals(""))){
                         AfterThrowingAdviceInterceptor interceptor = new AfterThrowingAdviceInterceptor(aspectMethods.get(config.getAspectAfterThrow()), aspectClass.newInstance());
                         interceptor.setThrowingName(config.getAspectAfterThrowingName());
                         advices.add(interceptor);
@@ -92,6 +97,7 @@ public class AdvisedSupport {
 
     public boolean pointCutMatch() {
         // 通过被代理类特征正则表达式来匹配当前类
+        pointCutClassPattern.matcher(this.targetClass.toString()).matches();
         return pointCutClassPattern.matcher(this.targetClass.toString()).matches();
     }
 
@@ -116,6 +122,7 @@ public class AdvisedSupport {
 
     public void setTargetClass(Class<?> targetClass) {
         this.targetClass = targetClass;
+        parse();
     }
 
     public Object getTarget() {

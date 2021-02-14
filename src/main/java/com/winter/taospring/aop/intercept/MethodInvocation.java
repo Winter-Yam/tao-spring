@@ -57,17 +57,17 @@ public class MethodInvocation implements JoinPoint {
 
     @Override
     public Object getThis() {
-        return null;
+        return this.target;
     }
 
     @Override
     public Object[] getArguments() {
-        return new Object[0];
+        return arguments;
     }
 
     @Override
     public Method getMethod() {
-        return null;
+        return method;
     }
 
     @Override

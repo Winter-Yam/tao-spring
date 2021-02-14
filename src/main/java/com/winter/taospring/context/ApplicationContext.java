@@ -1,7 +1,15 @@
 package com.winter.taospring.context;
 
+import com.winter.taospring.aop.AopProxy;
+import com.winter.taospring.aop.JdkDynamicAopProxy;
+import com.winter.taospring.aop.config.AopConfig;
+import com.winter.taospring.aop.support.AdvisedSupport;
 import com.winter.taospring.bean.*;
+import com.winter.taospring.web.annotation.Autowired;
+import com.winter.taospring.web.annotation.Controller;
+import com.winter.taospring.web.annotation.Service;
 
+import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -104,6 +112,13 @@ public class ApplicationContext extends DefaultListableBeanFactory implements Be
         // 2.将拿到的BeanWrapper放入IOC容器
         factoryBeanInstanceCache.put(beanName, beanWrapper);
 
+        // 处理接口注入问题
+        Class<?>[] interfaces = beanWrapper.getWrappedInstance().getClass().getInterfaces();
+        for (Class<?> anInterface : interfaces) {
+            this.factoryBeanInstanceCache.put(anInterface.getName(), beanWrapper);
+            this.factoryBeanInstanceCache.put(anInterface.getName(), beanWrapper);
+        }
+
         // 后置处理
         processor.postProcessAfter(instance, beanName);
 
@@ -116,10 +131,48 @@ public class ApplicationContext extends DefaultListableBeanFactory implements Be
     }
 
     /**
-     * 可以根据@Resource和@Autowired注入
+     * 只处理@Autowired注入
      */
     private void populateBean(String beanName, BeanDefinition beanDefinition, BeanWrapper beanWrapper) {
+        Class<?> clazz = beanWrapper.getWrappedClass();
+        // 只有容器管理的bean才会给他依赖注入
+        if (! clazz.isAnnotationPresent(Controller.class ) || clazz.isAnnotationPresent(Service.class)) { return; }
 
+        Object instance = beanWrapper.getWrappedInstance();
+        // 注：这里是getDeclaredFields，getFields只能获取到public字段
+        Field[] fields = clazz.getDeclaredFields();
+        for (Field field : fields) {
+            if (!field.isAnnotationPresent(Autowired.class)) {
+                continue;
+            }
+
+            // 1.获取注解中指定注入的beanName（byName注入）
+            Autowired annotation = field.getAnnotation(Autowired.class);
+            String autowiredBeanName = annotation.value().trim();
+
+            // 2.没有指定beanName的话，通过类型进行注入（byType注入）
+            // 注意：类型 = 自身类型 || 接口类型。在BeanDefinitionReader#loadBeanDefinitions已经对接口创建过BeanDefinition了（当一个接口有多个实现类时，后扫描的会覆盖先扫描的）
+            if ("".equals(autowiredBeanName)) {
+                // 除了simpleName，通过class拿到的都是全类名
+                // 前面初始化时已经用className向容器中注入过wrapper了
+                autowiredBeanName = field.getType().getName();
+            }
+
+            field.setAccessible(true);
+
+            try {
+                // 因为要给当前Bean注入时，可能要注入的Bean还没初始化，因此就暂时不给这个字段注入
+                // 但是当正式使用时还会getBean一次，这时所有bean都初始化完成了，就可以注入了
+                if(this.factoryBeanInstanceCache.get(autowiredBeanName) == null){
+                    continue;
+                }
+
+                // 获取具体Bean实例：这里是在通用IOC容器中获取，因为可能有多例情况
+                field.set(instance, this.factoryBeanInstanceCache.get(autowiredBeanName).getWrappedInstance());
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     private BeanWrapper instantiteBean(String beanName, BeanDefinition beanDefinition) {
@@ -134,8 +187,24 @@ public class ApplicationContext extends DefaultListableBeanFactory implements Be
                 Class<?> clazz = Class.forName(className);
                 instance = clazz.newInstance();
 
+
                 // 单例容器存放bean名和全限定名的实例
                 this.factoryBeanObjectCache.put(beanDefinition.getFactoryBeanName(), instance);
+                // =====================AOP入口========================
+                // 读取配置文件中的信息，并构建一个AdvisedSupport对象
+                AdvisedSupport config = initAopConfig(beanDefinition);
+                config.setTargetClass(clazz);
+                config.setTarget(instance);
+
+                // 判断当前BeanDefinition的类是否符合PointCut的规则的话（即符合被代理的对象要求），创建将代理对象
+                // 然后用代理对象替换当前对象，并放入IOC容器，
+                // 到时 mvc 初始化IOC容器时，就会将代理对象放入，再后来创建处理请求的handler时就会将该代理对象封装进去
+                if(config.pointCutMatch()) {
+                    // 这时获取到的 Proxy 持有的AdvisedSupport已经构造好了拦截器链
+                    // 到时 mvc 分发请求过来直接 proceed 执行即可
+                    instance = createProxy(config).getProxy();
+                }
+                // =====================AOP结束========================
                 this.factoryBeanObjectCache.put(className, instance);
             }
         } catch (Exception e) {
@@ -144,6 +213,32 @@ public class ApplicationContext extends DefaultListableBeanFactory implements Be
 
         // 返回封装的BeanWrapper
         return new BeanWrapper(instance);
+    }
+
+    private AopProxy createProxy(AdvisedSupport config) {
+        Class<?> targetClass = config.getTargetClass();
+        // 当前类存在接口时，使用jdk的动态代理
+        if (targetClass.getInterfaces().length > 0) {
+            return new JdkDynamicAopProxy(config);
+        }
+        return null;
+    }
+
+    /**
+     * 读取配置到AOPconfig，并转换为AdvisedSupport
+     * @param beanDefinition
+     * @return
+     */
+    private AdvisedSupport initAopConfig(BeanDefinition beanDefinition) {
+        AopConfig config = new AopConfig();
+        config.setPointCut(this.reader.getConfig().getProperty("pointCut"));
+        config.setAspectClass(this.reader.getConfig().getProperty("aspectClass"));
+        config.setAspectBefore(this.reader.getConfig().getProperty("aspectBefore"));
+        config.setAspectAfter(this.reader.getConfig().getProperty("aspectAfter"));
+        config.setAspectAfterThrow(this.reader.getConfig().getProperty("aspectAfterThrow"));
+        config.setAspectAfterThrowingName(this.reader.getConfig().getProperty("aspectAfterThrowingName"));
+
+        return new AdvisedSupport(config);
     }
 
     @Override
